@@ -1,4 +1,4 @@
-// lib/aksara-jawa.ts
+// lib/aksaraJawa.ts
 
 const CONSONANTS: Record<string, string> = {
   h: "ꦲ",
@@ -69,6 +69,7 @@ const MEDIAL_SIGNS: Record<string, string> = {
 
 // Beberapa kata yang e-nya perlu dibedakan.
 // Input tanpa diakritik memang ambigu dalam Bahasa Jawa.
+
 const PEPET_WORDS: Record<string, string> = {
   dhateng: "dhatêng",
   kembang: "kêmbang",
@@ -80,7 +81,12 @@ const PEPET_WORDS: Record<string, string> = {
   wektu: "wêktu",
   ngerti: "ngêrti",
   neng: "nêng",
+
+  // Tambahan kosakata Krama
+  nedha: "nêdha",
+  sekul: "sêkul",
 };
+
 
 const TALING_WORDS: Record<string, string> = {
   badhe: "badé",
@@ -296,11 +302,6 @@ function convertWord(rawWord: string): string {
     i = nextIndex;
   }
 
-  // Jangan tinggalkan pangkon di ujung kata.
-  if (result.endsWith("꧀")) {
-    result = result.slice(0, -1);
-  }
-
   return result;
 }
 
@@ -371,4 +372,156 @@ export function latinToAksara(text: string): string {
       return convertToken(part);
     })
     .join("");
+}
+
+/**
+ * Mengubah Aksara Jawa menjadi tulisan Latin.
+ *
+ * Mendukung:
+ * - Aksara nglegena
+ * - Sandhangan swara
+ * - Pangkon
+ * - Cakra dan pengkal
+ * - Cecak, layar, dan wignyan
+ * - Aksara swara
+ * - Angka Jawa
+ *
+ * Catatan: beberapa ejaan Latin tidak dapat dipulihkan secara
+ * pasti karena satu aksara dapat mewakili beberapa bunyi.
+ */
+export function aksaraToLatin(text: string): string {
+  if (!text.trim()) return "";
+
+  const reverseConsonants = new Map<string, string>(
+    Object.entries(CONSONANTS).map(([latin, aksara]) => [
+      aksara,
+      latin,
+    ])
+  );
+
+  const reverseIndependentVowels = new Map<string, string>([
+    ["ꦄ", "a"],
+    ["ꦆ", "i"],
+    ["ꦈ", "u"],
+    ["ꦌ", "e"],
+    ["ꦎ", "o"],
+  ]);
+
+  const reverseDigits = new Map<string, string>(
+    Object.entries(JAVANESE_DIGITS).map(([latin, aksara]) => [
+      aksara,
+      latin,
+    ])
+  );
+
+  const chars = Array.from(text);
+  let result = "";
+
+  for (let i = 0; i < chars.length; i++) {
+    const char = chars[i];
+
+    // Angka Jawa
+    if (reverseDigits.has(char)) {
+      result += reverseDigits.get(char);
+      continue;
+    }
+
+    // Aksara swara atau vokal mandiri
+    if (reverseIndependentVowels.has(char)) {
+      result += reverseIndependentVowels.get(char);
+      continue;
+    }
+
+    // Aksara dasar: secara default memiliki vokal inheren "a"
+    if (reverseConsonants.has(char)) {
+      result += reverseConsonants.get(char) + "a";
+      continue;
+    }
+
+    // Pangkon: menghilangkan vokal inheren "a"
+    if (char === "꧀") {
+      if (result.endsWith("a")) {
+        result = result.slice(0, -1);
+      }
+      continue;
+    }
+
+    // Sandhangan swara: wulu (i)
+    if (char === "ꦶ") {
+      if (result.endsWith("a")) {
+        result = result.slice(0, -1) + "i";
+      }
+      continue;
+    }
+
+    // Sandhangan swara: suku (u)
+    if (char === "ꦸ") {
+      if (result.endsWith("a")) {
+        result = result.slice(0, -1) + "u";
+      }
+      continue;
+    }
+
+    // Taling (e/é)
+    if (char === "ꦺ") {
+      if (result.endsWith("a")) {
+        result = result.slice(0, -1) + "é";
+      }
+      continue;
+    }
+
+    // Taling tarung: o
+    if (char === "ꦴ") {
+      if (result.endsWith("é")) {
+        result = result.slice(0, -1) + "o";
+      }
+      continue;
+    }
+
+    // Pepet (ê)
+    if (char === "ꦼ") {
+      if (result.endsWith("a")) {
+        result = result.slice(0, -1) + "ê";
+      }
+      continue;
+    }
+
+    // Cecak, layar, dan wignyan
+    if (char === "ꦁ") {
+      result += "ng";
+      continue;
+    }
+
+    if (char === "ꦂ") {
+      result += "r";
+      continue;
+    }
+
+    if (char === "ꦃ") {
+      result += "h";
+      continue;
+    }
+
+    // Cakra: tambahan bunyi r
+    if (char === "ꦿ") {
+      if (result.endsWith("a")) {
+        result = result.slice(0, -1) + "ra";
+      }
+      continue;
+    }
+
+    // Pengkal: tambahan bunyi y
+    if (char === "ꦾ") {
+      if (result.endsWith("a")) {
+        result = result.slice(0, -1) + "ya";
+      }
+      continue;
+    }
+
+    // Karakter lain, termasuk spasi dan tanda baca,
+    // dipertahankan.
+    result += char;
+  }
+
+  return result;
 }
