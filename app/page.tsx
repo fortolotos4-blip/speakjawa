@@ -356,10 +356,10 @@ export default function Home() {
                 : t.placeholderAksara
             }
             rows={4}
-            className={`w-full resize-y rounded-xl border p-4 outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100 ${
+            className={`h-[130px] w-full resize-y rounded-xl border p-4 outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100 ${
               mode === "fromAksara"
-                ? "text-2xl leading-loose"
-                : ""
+                ? "text-base leading-relaxed"
+                : "text-base leading-relaxed"
             }`}
           />
 
