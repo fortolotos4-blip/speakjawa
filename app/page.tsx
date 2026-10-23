@@ -238,10 +238,6 @@ export default function Home() {
               {t.tagline}
             </p>
           </div>
-
-          <div className="rounded-full bg-red-50 px-4 py-2 text-sm font-medium text-red-600">
-            {t.badge}
-          </div>
         </div>
       </header>
 
