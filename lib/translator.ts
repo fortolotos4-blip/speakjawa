@@ -1,4 +1,6 @@
 
+import { extraDictionary } from "./extraDictionary";
+
 export type JavaneseLevel = "ngoko" | "krama" | "krama-inggil";
 export type SourceLanguage = "id" | "en" | "zh";
 
@@ -19199,26 +19201,21 @@ const dictionary: DictionaryEntry[] = [
   },
 
   {
-  aliases: {id: ["nama saya","namaku"],en: ["my name"],zh: ["我的名字"]},
-  translation: {ngoko: "jenengku",krama: "asma kula","krama-inggil": "asma kula"},
-  },
-
-  {
-  aliases: {id: ["nama saya"],en: ["my name"],zh: ["我的名字"]},
-  translation: {ngoko: "jenengku",krama: "asma kula","krama-inggil": "asma kula"},
+    aliases: { id: ["nama saya", "namaku"], en: ["my name"], zh: ["我的名字"] },
+    translation: { ngoko: "jenengku", krama: "nama kula", "krama-inggil": "asma kula" },
   },
   {
-  aliases: {
-    id: ["tidak masalah", "tidak jadi soal"],
-    en: ["it doesn't matter", "it does not matter"],
-    zh: ["没关系"]
+    aliases: {
+      id: ["tidak masalah", "tidak jadi soal"],
+      en: ["it doesn't matter", "it does not matter"],
+      zh: ["没关系"],
+    },
+    translation: {
+      ngoko: "ora masalah",
+      krama: "mboten dados masalah",
+      "krama-inggil": "mboten dados masalah",
+    },
   },
-  translation: {
-    ngoko: "ora masalah",
-    krama: "mboten dados masalah",
-    "krama-inggil": "mboten dados masalah"
-  },
-},
 ];
 
 // Bentuk yang umum dipakai tidak selalu bisa diterjemahkan kata demi kata.
@@ -19245,6 +19242,11 @@ const sentenceRules: Record<
       krama: "Kula kesah dhateng pasar",
       "krama-inggil": "Kula tindak dhateng pasar",
     },
+    "i am going to the market": {
+      ngoko: "Aku lunga menyang pasar",
+      krama: "Kula kesah dhateng pasar",
+      "krama-inggil": "Kula tindak dhateng pasar",
+    },
     "i eat rice": {
       ngoko: "Aku mangan sega",
       krama: "Kula nedha sekul",
@@ -19263,147 +19265,1362 @@ const sentenceRules: Record<
       "krama-inggil": "Kula dhahar sekul",
     },
   },
-  
 };
 
-const aliasMaps: Record<
-  SourceLanguage,
-  Map<string, DictionaryEntry>
+const WORD_TOKEN_REGEX =
+  /[\p{L}\p{M}\p{N}]+(?:[-'’][\p{L}\p{M}\p{N}]+)*|[^\p{L}\p{M}\p{N}\s]+|\s+/gu;
+const WHITESPACE_ONLY_REGEX = /^\s+$/u;
+const PUNCTUATION_ONLY_REGEX = /^[^\p{L}\p{M}\p{N}\s]+$/u;
+const EN_GLOSS_SUFFIX_REGEX =
+  /,\s*(?:formal|respectful|a javanese\b.*|addressing\b.*|the eve of\b.*)$/iu;
+
+const ALL_LEVELS: JavaneseLevel[] = ["ngoko", "krama", "krama-inggil"];
+
+function normalizeText(value: string): string {
+  return value.normalize("NFC").toLocaleLowerCase("id-ID").trim();
+}
+
+function stripDiacritics(value: string): string {
+  return normalizeText(value)
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .normalize("NFC");
+}
+
+function tokenizeWordsOnly(value: string): string[] {
+  const matches = value.match(
+    /[\p{L}\p{M}\p{N}]+(?:[-'’][\p{L}\p{M}\p{N}]+)*/gu
+  );
+  return matches ? matches.map((word) => normalizeText(word)) : [];
+}
+
+/**
+ * Membersihkan alias dari tanda kurung keterangan, pemisah titik koma (Mandarin),
+ * dan catatan kamus (Inggris) agar pencocokan dan tampilan hasil selalu rapi.
+ */
+function expandAliases(
+  rawAliases: string[],
+  language: SourceLanguage
+): string[] {
+  const seen = new Set<string>();
+  const cleaned: string[] = [];
+
+  for (const raw of rawAliases) {
+    if (!raw || raw.includes("...")) continue;
+
+    // Buang catatan dalam kurung seperti "（非正式）" atau "(polite/neutral)".
+    const withoutParens = raw
+      .replace(/（[^）]*）/gu, "")
+      .replace(/\([^)]*\)/gu, "")
+      .trim();
+
+    const parts = withoutParens.split(/[;；]/u);
+
+    for (let part of parts) {
+      part = part.trim();
+      if (!part) continue;
+
+      if (language === "en") {
+        part = part.replace(EN_GLOSS_SUFFIX_REGEX, "").trim();
+      }
+
+      if (!part) continue;
+
+      const key = normalizeText(part);
+      if (!seen.has(key)) {
+        seen.add(key);
+        cleaned.push(part);
+      }
+    }
+  }
+
+  return cleaned;
+}
+
+function getPrimaryDisplayAlias(
+  entry: DictionaryEntry,
+  language: SourceLanguage
+): string | undefined {
+  return expandAliases(entry.aliases[language], language)[0];
+}
+
+function matchInitialCase(source: string, translated: string): string {
+  if (!source || !translated) return translated;
+
+  const firstSourceChar = Array.from(source)[0];
+  const firstTranslatedChar = Array.from(translated)[0];
+
+  if (
+    firstSourceChar &&
+    firstTranslatedChar &&
+    firstSourceChar === firstSourceChar.toLocaleUpperCase("id-ID") &&
+    firstSourceChar !== firstSourceChar.toLocaleLowerCase("id-ID") &&
+    firstTranslatedChar === firstTranslatedChar.toLocaleLowerCase("id-ID")
+  ) {
+    return (
+      firstTranslatedChar.toLocaleUpperCase("id-ID") +
+      translated.slice(firstTranslatedChar.length)
+    );
+  }
+
+  return translated;
+}
+
+// =====================================================================
+// PRECOMPUTED INDEXES (dibangun sekali saat modul dimuat agar instan)
+// =====================================================================
+
+type ForwardWordCandidate = {
+  words: string[];
+  charLength: number;
+  entry: DictionaryEntry;
+};
+
+type ForwardZhCandidate = {
+  alias: string;
+  entry: DictionaryEntry;
+};
+
+type ReverseCandidate = {
+  exactWords: string[];
+  normalizedWords: string[];
+  charLength: number;
+  entry: DictionaryEntry;
+};
+
+const forwardWordIndex: Record<
+  "id" | "en",
+  Map<string, ForwardWordCandidate[]>
 > = {
   id: new Map(),
   en: new Map(),
-  zh: new Map(),
 };
 
-for (const entry of dictionary) {
-  for (const language of ["id", "en", "zh"] as const) {
-    for (const alias of entry.aliases[language]) {
-      aliasMaps[language].set(alias.toLocaleLowerCase(), entry);
+const forwardZhIndex = new Map<string, ForwardZhCandidate[]>();
+
+const reverseIndexByLevel: Record<
+  JavaneseLevel,
+  Map<string, ReverseCandidate[]>
+> = {
+  ngoko: new Map(),
+  krama: new Map(),
+  "krama-inggil": new Map(),
+};
+
+const seenForwardKeys: Record<SourceLanguage, Set<string>> = {
+  id: new Set(),
+  en: new Set(),
+  zh: new Set(),
+};
+
+const seenReverseKeys: Record<JavaneseLevel, Set<string>> = {
+  ngoko: new Set(),
+  krama: new Set(),
+  "krama-inggil": new Set(),
+};
+
+const allDictionaryEntries: DictionaryEntry[] = [
+  ...dictionary,
+  ...extraDictionary,
+];
+
+for (const entry of allDictionaryEntries) {
+  // 1. Indeks maju Indonesia & Inggris (berdasarkan kata pertama)
+  for (const language of ["id", "en"] as const) {
+    const aliases = expandAliases(entry.aliases[language], language);
+
+    for (const alias of aliases) {
+      const words = tokenizeWordsOnly(alias);
+      if (words.length === 0) continue;
+
+      const joinedKey = words.join(" ");
+      if (seenForwardKeys[language].has(joinedKey)) continue;
+      seenForwardKeys[language].add(joinedKey);
+
+      const firstWord = words[0];
+      let bucket = forwardWordIndex[language].get(firstWord);
+      if (!bucket) {
+        bucket = [];
+        forwardWordIndex[language].set(firstWord, bucket);
+      }
+
+      bucket.push({
+        words,
+        charLength: joinedKey.length,
+        entry,
+      });
+    }
+  }
+
+  // 2. Indeks maju Mandarin (berdasarkan karakter pertama)
+  const zhAliases = expandAliases(entry.aliases.zh, "zh");
+  for (const alias of zhAliases) {
+    const key = normalizeText(alias);
+    if (!key || seenForwardKeys.zh.has(key)) continue;
+    seenForwardKeys.zh.add(key);
+
+    const firstChar = Array.from(key)[0];
+    if (!firstChar) continue;
+
+    let bucket = forwardZhIndex.get(firstChar);
+    if (!bucket) {
+      bucket = [];
+      forwardZhIndex.set(firstChar, bucket);
+    }
+
+    bucket.push({ alias: key, entry });
+  }
+
+  // 3. Indeks balik Bahasa Jawa -> bahasa tujuan (per tingkat bahasa)
+  for (const level of ALL_LEVELS) {
+    const rawJavanese = entry.translation[level];
+    if (!rawJavanese || !rawJavanese.trim()) continue;
+
+    // Pecah alternatif yang memakai "/" seperti "putra/putri".
+    const variants = rawJavanese
+      .split("/")
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    for (const variant of variants) {
+      const exactWords = tokenizeWordsOnly(variant);
+      if (exactWords.length === 0) continue;
+
+      const normalizedWords = exactWords.map(stripDiacritics);
+      const exactKey = exactWords.join(" ");
+
+      if (seenReverseKeys[level].has(exactKey)) continue;
+      seenReverseKeys[level].add(exactKey);
+
+      const firstNormWord = normalizedWords[0];
+      let bucket = reverseIndexByLevel[level].get(firstNormWord);
+      if (!bucket) {
+        bucket = [];
+        reverseIndexByLevel[level].set(firstNormWord, bucket);
+      }
+
+      bucket.push({
+        exactWords,
+        normalizedWords,
+        charLength: exactKey.length,
+        entry,
+      });
     }
   }
 }
 
-function translateWord(
-  word: string,
-  level: JavaneseLevel,
-  language: SourceLanguage
+// Urutkan setiap bucket dari frasa terpanjang ke terpendek sekali saja.
+for (const language of ["id", "en"] as const) {
+  for (const bucket of forwardWordIndex[language].values()) {
+    bucket.sort(
+      (a, b) => b.words.length - a.words.length || b.charLength - a.charLength
+    );
+  }
+}
+
+for (const bucket of forwardZhIndex.values()) {
+  bucket.sort((a, b) => b.alias.length - a.alias.length);
+}
+
+for (const level of ALL_LEVELS) {
+  for (const bucket of reverseIndexByLevel[level].values()) {
+    bucket.sort(
+      (a, b) =>
+        b.normalizedWords.length - a.normalizedWords.length ||
+        b.charLength - a.charLength
+    );
+  }
+}
+
+// =====================================================================
+// ATURAN TATA BAHASA RINGAN (100% OFFLINE) UNTUK INGGRIS & MANDARIN
+// =====================================================================
+
+type PossessiveKey = "my" | "your" | "your_formal" | "his_her" | "our" | "their";
+
+const EN_POSSESSIVE_MAP: Record<string, PossessiveKey> = {
+  my: "my",
+  your: "your",
+  his: "his_her",
+  her: "his_her",
+  its: "his_her",
+  our: "our",
+  their: "their",
+};
+
+const ZH_POSSESSIVE_LIST: Array<{ prefix: string; key: PossessiveKey }> = [
+  { prefix: "我们的", key: "our" },
+  { prefix: "你们的", key: "your" },
+  { prefix: "他们的", key: "their" },
+  { prefix: "她们的", key: "their" },
+  { prefix: "我的", key: "my" },
+  { prefix: "你的", key: "your" },
+  { prefix: "您的", key: "your_formal" },
+  { prefix: "他的", key: "his_her" },
+  { prefix: "她的", key: "his_her" },
+  { prefix: "它的", key: "his_her" },
+];
+
+const EN_ARTICLES = new Set(["a", "an", "the"]);
+const EN_BE_VERBS = new Set(["am", "is", "are"]);
+
+const EN_INFINITIVE_TRIGGERS = new Set([
+  "want",
+  "wants",
+  "wanted",
+  "like",
+  "likes",
+  "love",
+  "loves",
+  "need",
+  "needs",
+  "try",
+  "tries",
+  "plan",
+  "hope",
+  "learn",
+  "start",
+  "begin",
+  "have",
+  "has",
+  "ready",
+  "happy",
+  "glad",
+  "able",
+]);
+
+const EN_ADJECTIVES = new Set([
+  "big",
+  "large",
+  "small",
+  "little",
+  "tall",
+  "short",
+  "long",
+  "wide",
+  "narrow",
+  "high",
+  "low",
+  "good",
+  "bad",
+  "nice",
+  "fine",
+  "new",
+  "old",
+  "young",
+  "hot",
+  "cold",
+  "warm",
+  "cool",
+  "fast",
+  "slow",
+  "clean",
+  "dirty",
+  "beautiful",
+  "pretty",
+  "handsome",
+  "ugly",
+  "smart",
+  "clever",
+  "kind",
+  "friendly",
+  "rich",
+  "poor",
+  "happy",
+  "sad",
+  "angry",
+  "hungry",
+  "thirsty",
+  "tired",
+  "sick",
+  "healthy",
+  "strong",
+  "weak",
+  "heavy",
+  "light",
+  "hard",
+  "soft",
+  "sweet",
+  "sour",
+  "bitter",
+  "salty",
+  "spicy",
+  "delicious",
+  "tasty",
+  "expensive",
+  "cheap",
+  "red",
+  "blue",
+  "green",
+  "yellow",
+  "white",
+  "black",
+  "brown",
+  "gray",
+  "grey",
+  "pink",
+  "orange",
+  "purple",
+  "dark",
+  "bright",
+  "empty",
+  "full",
+  "easy",
+  "difficult",
+  "important",
+  "special",
+  "fresh",
+  "dry",
+  "wet",
+  "cute",
+  "funny",
+  "favorite",
+  "famous",
+]);
+
+const EN_NON_NOUN_FOLLOWERS = new Set([
+  "a",
+  "an",
+  "the",
+  "to",
+  "in",
+  "on",
+  "at",
+  "of",
+  "for",
+  "from",
+  "with",
+  "by",
+  "about",
+  "into",
+  "and",
+  "or",
+  "but",
+  "so",
+  "because",
+  "if",
+  "when",
+  "where",
+  "that",
+  "this",
+  "these",
+  "those",
+  "is",
+  "am",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "have",
+  "has",
+  "had",
+  "do",
+  "does",
+  "did",
+  "will",
+  "would",
+  "can",
+  "could",
+  "should",
+  "must",
+  "not",
+  "very",
+  "really",
+  "too",
+  "also",
+  "i",
+  "you",
+  "he",
+  "she",
+  "it",
+  "we",
+  "they",
+  "me",
+  "him",
+  "us",
+  "them",
+  "here",
+  "there",
+  "now",
+  "today",
+  "tomorrow",
+  "yesterday",
+]);
+
+const EN_IRREGULAR_PAST: Record<string, string> = {
+  ate: "eat",
+  bought: "buy",
+  came: "come",
+  drank: "drink",
+  felt: "feel",
+  gave: "give",
+  knew: "know",
+  made: "make",
+  ran: "run",
+  said: "say",
+  sat: "sit",
+  saw: "see",
+  slept: "sleep",
+  spoke: "speak",
+  stood: "stand",
+  thought: "think",
+  took: "take",
+  went: "go",
+  wrote: "write",
+};
+
+const EN_KNOWN_VERBS = new Set([
+  "be",
+  "buy",
+  "come",
+  "cook",
+  "do",
+  "drink",
+  "eat",
+  "feel",
+  "give",
+  "go",
+  "have",
+  "help",
+  "know",
+  "learn",
+  "like",
+  "listen",
+  "live",
+  "love",
+  "make",
+  "meet",
+  "need",
+  "play",
+  "read",
+  "run",
+  "say",
+  "see",
+  "sell",
+  "sit",
+  "sleep",
+  "speak",
+  "stand",
+  "study",
+  "take",
+  "talk",
+  "tell",
+  "think",
+  "try",
+  "wait",
+  "walk",
+  "want",
+  "wash",
+  "watch",
+  "work",
+  "write",
+]);
+
+const ZH_ADJECTIVES = new Set([
+  "大",
+  "小",
+  "长",
+  "短",
+  "高",
+  "矮",
+  "好",
+  "坏",
+  "新",
+  "旧",
+  "老",
+  "热",
+  "冷",
+  "快",
+  "慢",
+  "红",
+  "白",
+  "黑",
+  "蓝",
+  "绿",
+  "黄",
+  "漂亮",
+  "美丽",
+  "帅",
+  "聪明",
+  "开心",
+  "高兴",
+  "难过",
+  "好吃",
+  "美味",
+  "辣",
+  "甜",
+  "贵",
+  "便宜",
+  "干净",
+  "脏",
+  "红色",
+  "白色",
+  "黑色",
+  "蓝色",
+  "绿色",
+  "黄色",
+]);
+
+const ZH_VERBS = new Set([
+  "吃",
+  "喝",
+  "睡",
+  "睡觉",
+  "看",
+  "读",
+  "写",
+  "做",
+  "做饭",
+  "买",
+  "卖",
+  "工作",
+  "学习",
+  "玩",
+  "走",
+  "跑",
+  "说话",
+  "说",
+  "听",
+  "等",
+  "洗",
+  "帮",
+  "帮忙",
+  "去",
+  "来",
+  "坐",
+  "站",
+]);
+
+const ZH_CLASSIFIERS = new Set([
+  "个",
+  "本",
+  "只",
+  "张",
+  "辆",
+  "杯",
+  "碗",
+  "件",
+  "位",
+  "条",
+  "朵",
+  "把",
+]);
+
+const ZH_INTENSIFIERS = ["非常", "很", "太", "真"];
+
+function applyJavanesePossessive(
+  nounPhrase: string,
+  possessive: PossessiveKey,
+  level: JavaneseLevel
 ): string {
-  const entry = aliasMaps[language].get(word.toLocaleLowerCase());
-  return entry ? entry.translation[level] : word;
+  const trimmed = nounPhrase.trim();
+  if (!trimmed) return "";
+
+  if (level === "ngoko") {
+    const endsWithVowel = /[aiueoéèê]$/iu.test(trimmed);
+    switch (possessive) {
+      case "my":
+        return `${trimmed}ku`;
+      case "your":
+      case "your_formal":
+        return `${trimmed}mu`;
+      case "his_her":
+        return endsWithVowel ? `${trimmed}ne` : `${trimmed}e`;
+      case "our":
+        return `${trimmed} awake dhewe`;
+      case "their":
+        return `${trimmed} wong-wong iku`;
+    }
+  }
+
+  if (level === "krama") {
+    switch (possessive) {
+      case "my":
+        return `${trimmed} kula`;
+      case "your":
+        return `${trimmed} sampeyan`;
+      case "your_formal":
+        return `${trimmed} panjenengan`;
+      case "his_her":
+        return `${trimmed} piyambakipun`;
+      case "our":
+        return `${trimmed} kita`;
+      case "their":
+        return `${trimmed} piyambakipun sedaya`;
+    }
+  }
+
+  // krama-inggil
+  switch (possessive) {
+    case "my":
+      return `${trimmed} kula`;
+    case "your":
+    case "your_formal":
+      return `${trimmed} panjenengan`;
+    case "his_her":
+      return `${trimmed} panjenenganipun`;
+    case "our":
+      return `${trimmed} kita sedaya`;
+    case "their":
+      return `${trimmed} panjenenganipun sedaya`;
+  }
+}
+
+function getProgressiveMarker(level: JavaneseLevel): string {
+  return level === "ngoko" ? "lagi" : "saweg";
+}
+
+function lookupDirectWord(
+  word: string,
+  language: "id" | "en"
+): DictionaryEntry | undefined {
+  const normalized = normalizeText(word);
+  const bucket = forwardWordIndex[language].get(normalized);
+  return bucket?.find(
+    (candidate) =>
+      candidate.words.length === 1 && candidate.words[0] === normalized
+  )?.entry;
+}
+
+function lemmatizeEnglishWord(word: string): {
+  base: string;
+  entry: DictionaryEntry;
+  isProgressive: boolean;
+} | null {
+  const lower = normalizeText(word);
+
+  const direct = lookupDirectWord(lower, "en");
+  if (direct) {
+    return { base: lower, entry: direct, isProgressive: false };
+  }
+
+  // Irregular past (went -> go, ate -> eat, dll.)
+  const irregularBase = EN_IRREGULAR_PAST[lower];
+  if (irregularBase) {
+    const entry = lookupDirectWord(irregularBase, "en");
+    if (entry) return { base: irregularBase, entry, isProgressive: false };
+  }
+
+  // Bentuk -ing (drinking -> drink, writing -> write, running -> run)
+  if (lower.endsWith("ing") && lower.length > 4) {
+    const stem = lower.slice(0, -3);
+    const candidates = [stem, `${stem}e`];
+    if (stem.length >= 2 && stem[stem.length - 1] === stem[stem.length - 2]) {
+      candidates.push(stem.slice(0, -1));
+    }
+    if (lower.endsWith("ying")) {
+      candidates.push(`${lower.slice(0, -4)}ie`);
+    }
+
+    for (const candidate of candidates) {
+      const entry = lookupDirectWord(candidate, "en");
+      if (entry) {
+        return { base: candidate, entry, isProgressive: true };
+      }
+    }
+  }
+
+  // Bentuk jamak / orang ketiga (-ies, -es, -s)
+  if (lower.endsWith("ies") && lower.length > 4) {
+    const candidate = `${lower.slice(0, -3)}y`;
+    const entry = lookupDirectWord(candidate, "en");
+    if (entry) return { base: candidate, entry, isProgressive: false };
+  }
+
+  if (lower.endsWith("es") && lower.length > 3) {
+    const candidate = lower.slice(0, -2);
+    const entry = lookupDirectWord(candidate, "en");
+    if (entry) return { base: candidate, entry, isProgressive: false };
+  }
+
+  if (lower.endsWith("s") && !lower.endsWith("ss") && lower.length > 3) {
+    const candidate = lower.slice(0, -1);
+    const entry = lookupDirectWord(candidate, "en");
+    if (entry) return { base: candidate, entry, isProgressive: false };
+  }
+
+  // Bentuk lampau beraturan (-ied, -ed, -d)
+  if (lower.endsWith("ied") && lower.length > 4) {
+    const candidate = `${lower.slice(0, -3)}y`;
+    const entry = lookupDirectWord(candidate, "en");
+    if (entry) return { base: candidate, entry, isProgressive: false };
+  }
+
+  if (lower.endsWith("ed") && lower.length > 4) {
+    const stem = lower.slice(0, -2);
+    const candidates = [stem, `${stem}e`];
+    if (stem.length >= 2 && stem[stem.length - 1] === stem[stem.length - 2]) {
+      candidates.push(stem.slice(0, -1));
+    }
+    for (const candidate of candidates) {
+      const entry = lookupDirectWord(candidate, "en");
+      if (entry) return { base: candidate, entry, isProgressive: false };
+    }
+  }
+
+  return null;
+}
+
+function expandEnglishContractions(text: string): string {
+  return text
+    .replace(/\bI['’]m\b/gi, "I am")
+    .replace(/\b(you|we|they)['’]re\b/gi, "$1 are")
+    .replace(/\b(he|she|it|that|what|where|who)['’]s\b/gi, "$1 is")
+    .replace(/\b(I|you|he|she|we|they)['’]ll\b/gi, "$1 will")
+    .replace(/\b(I|you|we|they)['’]ve\b/gi, "$1 have")
+    .replace(/\b(is|are|was|were|have|has|had|would|could|should)n['’]t\b/gi, "$1 not")
+    .replace(/\bwon['’]t\b/gi, "will not")
+    .replace(/\bcan['’]t\b/gi, "cannot");
+}
+
+function nextWordTokenIndex(tokens: string[], fromIndex: number): number {
+  let idx = fromIndex;
+  while (idx < tokens.length && WHITESPACE_ONLY_REGEX.test(tokens[idx])) {
+    idx++;
+  }
+  if (idx >= tokens.length || PUNCTUATION_ONLY_REGEX.test(tokens[idx])) {
+    return -1;
+  }
+  return idx;
+}
+
+function isLikelyEnglishNounToken(word: string): boolean {
+  const lower = normalizeText(word);
+  if (
+    !lower ||
+    EN_NON_NOUN_FOLLOWERS.has(lower) ||
+    EN_ADJECTIVES.has(lower) ||
+    EN_POSSESSIVE_MAP[lower]
+  ) {
+    return false;
+  }
+
+  return lemmatizeEnglishWord(lower) !== null;
+}
+
+function translateSingleWordFallback(
+  token: string,
+  level: JavaneseLevel,
+  language: "id" | "en"
+): string {
+  const direct = lookupDirectWord(token, language);
+  if (direct) {
+    return matchInitialCase(token, direct.translation[level]);
+  }
+
+  if (language === "en") {
+    const lemma = lemmatizeEnglishWord(token);
+    if (lemma && lemma.entry.translation[level]) {
+      return matchInitialCase(token, lemma.entry.translation[level]);
+    }
+  }
+
+  // Dukungan kata ulang ber-tanda hubung (misal "rumah-rumah" -> "griya-griya").
+  if (token.includes("-")) {
+    const parts = token.split("-");
+    let changed = false;
+
+    const translatedParts = parts.map((part) => {
+      const partHit = lookupDirectWord(part, language);
+      if (partHit && partHit.translation[level]) {
+        changed = true;
+        return matchInitialCase(part, partHit.translation[level]);
+      }
+
+      return part;
+    });
+
+    if (changed) {
+      return translatedParts.join("-");
+    }
+  }
+
+  return token;
+}
+
+function findForwardPhraseMatch(
+  tokens: string[],
+  startIndex: number,
+  language: "id" | "en"
+): { entry: DictionaryEntry; endIndex: number; wordCount: number } | null {
+  const firstWord = normalizeText(tokens[startIndex]);
+  const candidates = forwardWordIndex[language].get(firstWord);
+  if (!candidates) return null;
+
+  for (const candidate of candidates) {
+    const targetLen = candidate.words.length;
+    let j = startIndex;
+    let matchedWords = 0;
+    let isMatch = true;
+
+    while (j < tokens.length && matchedWords < targetLen) {
+      if (WHITESPACE_ONLY_REGEX.test(tokens[j])) {
+        j++;
+        continue;
+      }
+
+      if (PUNCTUATION_ONLY_REGEX.test(tokens[j])) {
+        isMatch = false;
+        break;
+      }
+
+      if (normalizeText(tokens[j]) !== candidate.words[matchedWords]) {
+        isMatch = false;
+        break;
+      }
+
+      matchedWords++;
+      j++;
+    }
+
+    if (isMatch && matchedWords === targetLen) {
+      return { entry: candidate.entry, endIndex: j, wordCount: targetLen };
+    }
+  }
+
+  return null;
+}
+
+function pushCleanResult(
+  result: string[],
+  translated: string
+): void {
+  if (translated) {
+    result.push(translated);
+  } else if (
+    result.length > 0 &&
+    WHITESPACE_ONLY_REGEX.test(result[result.length - 1])
+  ) {
+    result.pop();
+  }
 }
 
 function translateWords(
   text: string,
   level: JavaneseLevel,
-  language: SourceLanguage
+  language: "id" | "en"
 ): string {
-  // Alias terpanjang diprioritaskan.
-  // Contoh: "dua puluh" sebelum "dua".
-  const aliases = [...aliasMaps[language].keys()].sort(
-    (a, b) => b.length - a.length
-  );
-
-  // Pisahkan kata, spasi, dan tanda baca.
-  const tokens =
-    text.match(
-      /[\p{L}\p{M}\p{N}]+(?:['’][\p{L}\p{M}]+)*|[^\p{L}\p{M}\p{N}\s]+|\s+/gu
-    ) ?? [];
+  const preparedText =
+    language === "en" ? expandEnglishContractions(text) : text;
+  const tokens = preparedText.match(WORD_TOKEN_REGEX) ?? [];
 
   const result: string[] = [];
   let i = 0;
+  let prevEnglishWord = "";
 
   while (i < tokens.length) {
     const token = tokens[i];
 
     // Pertahankan spasi dan tanda baca.
-    if (/^\s+$/u.test(token) || /^[^\p{L}\p{M}\p{N}\s]+$/u.test(token)) {
+    if (WHITESPACE_ONLY_REGEX.test(token) || PUNCTUATION_ONLY_REGEX.test(token)) {
       result.push(token);
+      if (PUNCTUATION_ONLY_REGEX.test(token)) {
+        prevEnglishWord = "";
+      }
       i++;
       continue;
     }
 
-    let matchedEntry: DictionaryEntry | undefined;
-    let matchedEnd = i;
+    const lower = normalizeText(token);
 
-    // Cari alias yang cocok, dimulai dari yang terpanjang.
-    for (const alias of aliases) {
-      const aliasWords = alias.trim().split(/\s+/u);
+    // 1. Prioritaskan frasa multi-kata dari kamus terlebih dahulu
+    // (misal "good morning", "thank you very much", "my name", "baik-baik saja").
+    // Kecuali frasa "I am" yang langsung diikuti kata kerja -ing ("I am drinking"),
+    // agar aturan progresif ("saweg / lagi") tetap bekerja.
+    const phraseMatch = findForwardPhraseMatch(tokens, i, language);
+    const shouldYieldToEnglishProgressive =
+      language === "en" &&
+      phraseMatch !== null &&
+      phraseMatch.wordCount === 2 &&
+      lower === "i" &&
+      normalizeText(tokens[phraseMatch.endIndex - 1]) === "am" &&
+      (() => {
+        const afterIdx = nextWordTokenIndex(tokens, phraseMatch.endIndex);
+        if (afterIdx === -1) return false;
+        const afterWord = normalizeText(tokens[afterIdx]);
+        return (
+          afterWord === "going" ||
+          lemmatizeEnglishWord(afterWord)?.isProgressive === true
+        );
+      })();
 
-      let j = i;
-      const candidateWords: string[] = [];
+    if (
+      phraseMatch &&
+      phraseMatch.wordCount > 1 &&
+      !shouldYieldToEnglishProgressive
+    ) {
+      pushCleanResult(
+        result,
+        matchInitialCase(token, phraseMatch.entry.translation[level])
+      );
+      prevEnglishWord = lower;
+      i = phraseMatch.endIndex;
+      continue;
+    }
 
-      while (j < tokens.length && candidateWords.length < aliasWords.length) {
-        if (/^\s+$/u.test(tokens[j])) {
-          j++;
-          continue;
-        }
-
-        if (/^[^\p{L}\p{M}\p{N}\s]+$/u.test(tokens[j])) {
-          break;
-        }
-
-        candidateWords.push(tokens[j].toLocaleLowerCase());
-        j++;
+    // 2. Aturan tata bahasa khusus Bahasa Inggris (offline).
+    if (language === "en") {
+      // 2a. Lewati artikel (a, an, the) yang tidak ada di Bahasa Jawa.
+      if (EN_ARTICLES.has(lower)) {
+        pushCleanResult(result, "");
+        i++;
+        continue;
       }
 
-      if (
-        candidateWords.length === aliasWords.length &&
-        candidateWords.every((word, index) => word === aliasWords[index])
-      ) {
-        matchedEntry = aliasMaps[language].get(alias);
-        matchedEnd = j;
-        break;
+      // 2b. Lewati "to" infinitive setelah kata kerja (misal "want to eat" -> "kepengin nedha").
+      if (lower === "to" && EN_INFINITIVE_TRIGGERS.has(prevEnglishWord)) {
+        const nextIdx = nextWordTokenIndex(tokens, i + 1);
+        if (nextIdx !== -1) {
+          const nextWord = normalizeText(tokens[nextIdx]);
+          const nextLemma = lemmatizeEnglishWord(nextWord);
+          if (
+            EN_KNOWN_VERBS.has(nextWord) ||
+            (nextLemma && EN_KNOWN_VERBS.has(nextLemma.base))
+          ) {
+            pushCleanResult(result, "");
+            i++;
+            continue;
+          }
+        }
+      }
+
+      // 2c. Tangani "am / is / are" + "-ing" / "going to" / kopula.
+      if (EN_BE_VERBS.has(lower)) {
+        const nextIdx = nextWordTokenIndex(tokens, i + 1);
+
+        if (nextIdx !== -1) {
+          const nextToken = tokens[nextIdx];
+          const nextLower = normalizeText(nextToken);
+
+          // "is/am/are going to <verb|place>"
+          if (nextLower === "going") {
+            const afterGoingIdx = nextWordTokenIndex(tokens, nextIdx + 1);
+            if (
+              afterGoingIdx !== -1 &&
+              normalizeText(tokens[afterGoingIdx]) === "to"
+            ) {
+              const targetIdx = nextWordTokenIndex(tokens, afterGoingIdx + 1);
+              const targetWord =
+                targetIdx !== -1 ? normalizeText(tokens[targetIdx]) : "";
+
+              if (targetWord && EN_KNOWN_VERBS.has(targetWord)) {
+                // Future: "is going to eat" -> "badhe nedha" / "arep mangan"
+                const futureWord = level === "ngoko" ? "arep" : "badhe";
+                pushCleanResult(result, matchInitialCase(token, futureWord));
+                prevEnglishWord = "going";
+                i = afterGoingIdx + 1;
+                continue;
+              }
+
+              // Arah tempat: "is going to school" -> "saweg kesah dhateng sekolah"
+              const goEntry = lookupDirectWord("go", "en");
+              const goWord = goEntry?.translation[level] ?? "kesah";
+              pushCleanResult(
+                result,
+                matchInitialCase(
+                  token,
+                  `${getProgressiveMarker(level)} ${goWord}`
+                )
+              );
+              prevEnglishWord = "go";
+              i = nextIdx + 1;
+              continue;
+            }
+          }
+
+          // "am/is/are + <verb>-ing" -> "saweg / lagi <verb>"
+          const lemma = lemmatizeEnglishWord(nextLower);
+          if (lemma && lemma.isProgressive && lemma.entry.translation[level]) {
+            const prog = `${getProgressiveMarker(level)} ${lemma.entry.translation[level]}`;
+            pushCleanResult(result, matchInitialCase(token, prog));
+            prevEnglishWord = lemma.base;
+            i = nextIdx + 1;
+            continue;
+          }
+        }
+
+        // Kopula biasa ("She is smart", "Where is the market?") dihilangkan.
+        pushCleanResult(result, "");
+        i++;
+        continue;
+      }
+
+      // 2d. Kepemilikan: "my/your/his/her/our/their + (adj) + noun" -> "<noun> (<adj>) <poss>".
+      const possessiveKey = EN_POSSESSIVE_MAP[lower];
+      if (possessiveKey) {
+        const idx1 = nextWordTokenIndex(tokens, i + 1);
+
+        if (idx1 !== -1) {
+          const w1 = normalizeText(tokens[idx1]);
+
+          // Pola: possessive + adjective + noun (misal "my big house")
+          if (EN_ADJECTIVES.has(w1)) {
+            const idx2 = nextWordTokenIndex(tokens, idx1 + 1);
+            if (idx2 !== -1 && isLikelyEnglishNounToken(tokens[idx2])) {
+              const adjText = translateSingleWordFallback(tokens[idx1], level, "en");
+              const nounText = translateSingleWordFallback(tokens[idx2], level, "en");
+              const phrase =
+                level === "ngoko"
+                  ? `${applyJavanesePossessive(nounText, possessiveKey, level)} ${adjText}`
+                  : applyJavanesePossessive(`${nounText} ${adjText}`, possessiveKey, level);
+
+              pushCleanResult(result, matchInitialCase(token, phrase));
+              prevEnglishWord = normalizeText(tokens[idx2]);
+              i = idx2 + 1;
+              continue;
+            }
+          }
+
+          // Pola: possessive + noun (misal "my book", "your house", "his mother")
+          if (isLikelyEnglishNounToken(tokens[idx1])) {
+            const nounText = translateSingleWordFallback(tokens[idx1], level, "en");
+            const phrase = applyJavanesePossessive(nounText, possessiveKey, level);
+
+            pushCleanResult(result, matchInitialCase(token, phrase));
+            prevEnglishWord = w1;
+            i = idx1 + 1;
+            continue;
+          }
+        }
+      }
+
+      // 2e. Kata sifat + benda: "big house" -> "griya ageng", "red flower" -> "sekar abrit".
+      if (EN_ADJECTIVES.has(lower)) {
+        const nextIdx = nextWordTokenIndex(tokens, i + 1);
+        if (nextIdx !== -1 && isLikelyEnglishNounToken(tokens[nextIdx])) {
+          const adjText = translateSingleWordFallback(token, level, "en");
+          const nounText = translateSingleWordFallback(tokens[nextIdx], level, "en");
+          pushCleanResult(
+            result,
+            matchInitialCase(token, `${nounText} ${adjText}`)
+          );
+          prevEnglishWord = normalizeText(tokens[nextIdx]);
+          i = nextIdx + 1;
+          continue;
+        }
       }
     }
 
-    if (matchedEntry) {
-      result.push(matchedEntry.translation[level]);
-      i = matchedEnd;
+    // 3. Pencocokan kata tunggal dari kamus atau fallback lemmatization.
+    if (phraseMatch && !shouldYieldToEnglishProgressive) {
+      pushCleanResult(
+        result,
+        matchInitialCase(token, phraseMatch.entry.translation[level])
+      );
+      prevEnglishWord = lower;
+      i = phraseMatch.endIndex;
     } else {
-      result.push(translateWord(token, level, language));
+      pushCleanResult(
+        result,
+        translateSingleWordFallback(token, level, language)
+      );
+      prevEnglishWord = lower;
       i++;
     }
   }
 
-  return result.join("");
+  return result
+    .join("")
+    .replace(/ {2,}/g, " ")
+    .replace(/\s+([,.!?;:])/g, "$1")
+    .trim();
+}
+
+function matchZhAt(text: string, position: number): ForwardZhCandidate | null {
+  if (position >= text.length) return null;
+
+  const char = String.fromCodePoint(text.codePointAt(position)!);
+  const candidates = forwardZhIndex.get(normalizeText(char));
+  if (!candidates) return null;
+
+  const remainingLower = normalizeText(text.slice(position, position + 24));
+  return (
+    candidates.find((candidate) => remainingLower.startsWith(candidate.alias)) ??
+    null
+  );
+}
+
+function isZhNounCandidate(alias: string): boolean {
+  return (
+    !!alias &&
+    !ZH_ADJECTIVES.has(alias) &&
+    !ZH_VERBS.has(alias) &&
+    !ZH_CLASSIFIERS.has(alias) &&
+    !ZH_INTENSIFIERS.includes(alias) &&
+    !["的", "了", "吗", "呢", "在", "不", "没", "我", "你", "您", "他", "她", "它", "这", "那", "和", "跟"].includes(alias)
+  );
 }
 
 function translateChinese(
   text: string,
   level: JavaneseLevel
 ): string {
-  // Cocokkan alias Mandarin terpanjang lebih dahulu,
-  // misalnya "睡觉" sebelum "睡".
-  const aliases = [...aliasMaps.zh.keys()].sort(
-    (a, b) => b.length - a.length
-  );
-
   const output: string[] = [];
   let position = 0;
 
   while (position < text.length) {
-    const remaining = text.slice(position);
-    const matched = aliases.find((alias) => remaining.startsWith(alias));
+    const char = String.fromCodePoint(text.codePointAt(position)!);
 
-    if (matched) {
-      output.push(aliasMaps.zh.get(matched)!.translation[level]);
-      position += matched.length;
+    if (WHITESPACE_ONLY_REGEX.test(char)) {
+      position += char.length;
       continue;
     }
 
-    const character = String.fromCodePoint(text.codePointAt(position)!);
-    output.push(character);
-    position += character.length;
+    const remaining = text.slice(position);
+
+    // 1. Cek frasa kamus multi-karakter terlebih dahulu (misal "我的名字", "我很好", "非常感谢").
+    const directMatch = matchZhAt(text, position);
+    if (
+      directMatch &&
+      directMatch.alias.length >= 3 &&
+      !ZH_POSSESSIVE_LIST.some((p) => p.prefix === directMatch.alias)
+    ) {
+      const translated = directMatch.entry.translation[level];
+      if (translated) output.push(translated);
+      position += directMatch.alias.length;
+      continue;
+    }
+
+    // 2. Pola kepemilikan: "我的/你的/他的/她的/我们的/他们的 + <Benda>"
+    //    Contoh: "我的书" -> "buku kula" / "bukuku", "你的房子" -> "griya sampeyan" / "omahmu".
+    const possHit = ZH_POSSESSIVE_LIST.find((item) =>
+      remaining.startsWith(item.prefix)
+    );
+    if (possHit) {
+      const afterPossPos = position + possHit.prefix.length;
+      const nextMatch = matchZhAt(text, afterPossPos);
+
+      if (nextMatch && isZhNounCandidate(nextMatch.alias)) {
+        const nounWord = nextMatch.entry.translation[level];
+        if (nounWord) {
+          output.push(applyJavanesePossessive(nounWord, possHit.key, level));
+          position = afterPossPos + nextMatch.alias.length;
+          continue;
+        }
+      }
+    }
+
+    // 3. Demonstratif + kata bantu bilangan + benda: "这本书" -> "buku menika", "那个房子" -> "griya menika".
+    if (char === "这" || char === "那") {
+      const nextPos = position + char.length;
+      const classifier =
+        nextPos < text.length
+          ? String.fromCodePoint(text.codePointAt(nextPos)!)
+          : "";
+
+      if (ZH_CLASSIFIERS.has(classifier)) {
+        const nounPos = nextPos + classifier.length;
+        const nounMatch = matchZhAt(text, nounPos);
+        if (nounMatch && isZhNounCandidate(nounMatch.alias)) {
+          const nounWord = nounMatch.entry.translation[level];
+          const demoWord =
+            level === "ngoko" ? (char === "这" ? "iki" : "iku") : "menika";
+          if (nounWord) {
+            output.push(`${nounWord} ${demoWord}`);
+            position = nounPos + nounMatch.alias.length;
+            continue;
+          }
+        }
+      }
+    }
+
+    // 4. "正在" atau "在" + kata kerja -> "saweg" (Krama) / "lagi" (Ngoko)
+    //    Contoh: "我在喝水" -> "kula saweg ngunjuk toya".
+    if (remaining.startsWith("正在") || char === "在") {
+      const markerLen = remaining.startsWith("正在") ? 2 : 1;
+      const afterPos = position + markerLen;
+      const verbMatch = matchZhAt(text, afterPos);
+
+      if (verbMatch && ZH_VERBS.has(verbMatch.alias)) {
+        const verbWord = verbMatch.entry.translation[level];
+        output.push(`${getProgressiveMarker(level)} ${verbWord}`);
+        position = afterPos + verbMatch.alias.length;
+        continue;
+      }
+    }
+
+    // 5. Penguat + kata sifat: "很大" -> "ageng sanget", "非常好吃" -> "eca sanget".
+    const intensifier = ZH_INTENSIFIERS.find((item) =>
+      remaining.startsWith(item)
+    );
+    if (intensifier) {
+      const afterIntPos = position + intensifier.length;
+      const adjMatch = matchZhAt(text, afterIntPos);
+      if (adjMatch && ZH_ADJECTIVES.has(adjMatch.alias)) {
+        const adjWord = adjMatch.entry.translation[level];
+        const intWord =
+          intensifier === "真"
+            ? level === "ngoko"
+              ? "tenan"
+              : "saestu"
+            : level === "ngoko"
+              ? "banget"
+              : "sanget";
+        if (adjWord) {
+          output.push(`${adjWord} ${intWord}`);
+          position = afterIntPos + adjMatch.alias.length;
+          continue;
+        }
+      }
+    }
+
+    // 6. Kata sifat + (opsional "的") + benda: "大房子" -> "griya ageng", "红花" -> "sekar abrit", "新的书" -> "buku enggal".
+    if (directMatch && ZH_ADJECTIVES.has(directMatch.alias)) {
+      let nounPos = position + directMatch.alias.length;
+      if (text[nounPos] === "的") {
+        nounPos += 1;
+      }
+
+      const nounMatch = matchZhAt(text, nounPos);
+      if (nounMatch && isZhNounCandidate(nounMatch.alias)) {
+        const adjWord = directMatch.entry.translation[level];
+        const nounWord = nounMatch.entry.translation[level];
+        if (adjWord && nounWord) {
+          output.push(`${nounWord} ${adjWord}`);
+          position = nounPos + nounMatch.alias.length;
+          continue;
+        }
+      }
+    }
+
+    // 7. Pencocokan kamus standar.
+    if (directMatch) {
+      const translated = directMatch.entry.translation[level];
+      if (translated) {
+        output.push(translated);
+      }
+      position += directMatch.alias.length;
+      continue;
+    }
+
+    // Lewati partikel akhir "了" jika tidak tertangkap frasa khusus.
+    if (char === "了") {
+      position += char.length;
+      continue;
+    }
+
+    output.push(char);
+    position += char.length;
   }
 
   // Spasi ditambahkan di antara kata Jawa yang dikenali.
   // Tanda baca Mandarin dipertahankan.
-  return output
+  const joined = output
     .join(" ")
     .replace(/\s+([，。！？、；：,.!?;:])/gu, "$1")
     .replace(/([（(])\s+/gu, "$1")
     .replace(/\s+([）)])/gu, "$1")
+    .replace(/ {2,}/g, " ")
     .trim();
+
+  // Kapitalisasi huruf awal kalimat agar tampilan rapi.
+  if (!joined) return "";
+  const firstChar = Array.from(joined)[0];
+  if (firstChar && /[a-z]/i.test(firstChar)) {
+    return firstChar.toLocaleUpperCase("id-ID") + joined.slice(firstChar.length);
+  }
+  return joined;
 }
 
 export function translateToJavanese(
@@ -19434,14 +20651,78 @@ export function translateToJavanese(
   return translateWords(input, level, sourceLanguage);
 }
 
+function findReverseMatch(
+  tokens: string[],
+  startIndex: number,
+  levelOrder: JavaneseLevel[]
+): { entry: DictionaryEntry; endIndex: number } | null {
+  const firstNorm = stripDiacritics(tokens[startIndex]);
+
+  for (const level of levelOrder) {
+    const candidates = reverseIndexByLevel[level].get(firstNorm);
+    if (!candidates) continue;
+
+    let fallbackHit: { entry: DictionaryEntry; endIndex: number } | null = null;
+
+    for (const candidate of candidates) {
+      const targetLen = candidate.normalizedWords.length;
+      let j = startIndex;
+      let matchedWords = 0;
+      let exactMatch = true;
+      let normalizedMatch = true;
+
+      while (j < tokens.length && matchedWords < targetLen) {
+        if (WHITESPACE_ONLY_REGEX.test(tokens[j])) {
+          j++;
+          continue;
+        }
+
+        if (PUNCTUATION_ONLY_REGEX.test(tokens[j])) {
+          exactMatch = false;
+          normalizedMatch = false;
+          break;
+        }
+
+        const currentExact = normalizeText(tokens[j]);
+        const currentNorm = stripDiacritics(tokens[j]);
+
+        if (currentNorm !== candidate.normalizedWords[matchedWords]) {
+          exactMatch = false;
+          normalizedMatch = false;
+          break;
+        }
+
+        if (currentExact !== candidate.exactWords[matchedWords]) {
+          exactMatch = false;
+        }
+
+        matchedWords++;
+        j++;
+      }
+
+      if (matchedWords === targetLen && exactMatch) {
+        return { entry: candidate.entry, endIndex: j };
+      }
+
+      if (matchedWords === targetLen && normalizedMatch && !fallbackHit) {
+        fallbackHit = { entry: candidate.entry, endIndex: j };
+      }
+    }
+
+    if (fallbackHit) {
+      return fallbackHit;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Menerjemahkan Bahasa Jawa ke bahasa tujuan
  * berdasarkan dataset SpeakJawa yang sudah tersedia.
  *
- * targetLanguage:
- * "id" = Indonesia
- * "en" = English
- * "zh" = Mandarin
+ * Mengutamakan tingkat bahasa yang dipilih, lalu otomatis mencari
+ * ke tingkat bahasa lainnya jika kosakata tidak ditemukan pada level utama.
  */
 export function translateJavaneseToLanguage(
   text: string,
@@ -19452,58 +20733,13 @@ export function translateJavaneseToLanguage(
 
   if (!input) return "";
 
-  // Normalisasi untuk pencocokan kosakata.
-const normalize = (value: string) =>
-  value
-    .normalize("NFC")
-    .toLocaleLowerCase("id-ID")
-    .trim();
+  // Prioritaskan level yang dipilih pengguna, lalu fallback ke 2 level lainnya.
+  const levelOrder: JavaneseLevel[] = [
+    level,
+    ...ALL_LEVELS.filter((other) => other !== level),
+  ];
 
-const normalizeForLookup = (value: string) =>
-  normalize(value)
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .normalize("NFC");
-
-  /**
-   * Buat indeks terbalik dari terjemahan Jawa.
-   * Jika satu kata memiliki beberapa arti, entri pertama
-   * dalam dataset akan menjadi padanan default.
-   */
-  const reverseMap = new Map<string, DictionaryEntry>();
-
-  for (const entry of dictionary) {
-    const javanese = normalize(entry.translation[level]);
-
-    if (javanese && !reverseMap.has(javanese)) {
-      reverseMap.set(javanese, entry);
-    }
-  }
-  // Indeks cadangan untuk kata yang memiliki perbedaan diakritik,
-// misalnya é yang dicocokkan sebagai e.
-  const fallbackReverseMap = new Map<string, DictionaryEntry>();
-
-  for (const entry of dictionary) {
-    const key = normalizeForLookup(entry.translation[level]);
-
-    if (key && !fallbackReverseMap.has(key)) {
-      fallbackReverseMap.set(key, entry);
-    }
-  }
-
-  // Dahulukan frasa panjang, misalnya "ora masalah"
-  // sebelum mencocokkan kata-kata yang lebih pendek.
-  const reverseAliases = [...reverseMap.keys()].sort(
-    (a, b) => b.length - a.length
-  );
-
-  // Pisahkan kata, spasi, dan tanda baca agar format
-  // input dapat dipertahankan.
-  const tokens =
-    input.match(
-      /[\p{L}\p{M}\p{N}]+(?:['’][\p{L}\p{M}]+)*|[^\p{L}\p{M}\p{N}\s]+|\s+/gu
-    ) ?? [];
-
+  const tokens = input.match(WORD_TOKEN_REGEX) ?? [];
   const result: string[] = [];
   let i = 0;
 
@@ -19511,84 +20747,37 @@ const normalizeForLookup = (value: string) =>
     const token = tokens[i];
 
     // Pertahankan spasi dan tanda baca.
-    if (
-      /^\s+$/u.test(token) ||
-      /^[^\p{L}\p{M}\p{N}\s]+$/u.test(token)
-    ) {
+    if (WHITESPACE_ONLY_REGEX.test(token) || PUNCTUATION_ONLY_REGEX.test(token)) {
       result.push(token);
       i++;
       continue;
     }
 
-    let matchedEntry: DictionaryEntry | undefined;
-    let matchedEnd = i;
+    const match = findReverseMatch(tokens, i, levelOrder);
 
-    for (const phrase of reverseAliases) {
-      const phraseWords = phrase.split(/\s+/u);
-      const candidateWords: string[] = [];
-      let j = i;
-
-      while (
-        j < tokens.length &&
-        candidateWords.length < phraseWords.length
-      ) {
-        if (/^\s+$/u.test(tokens[j])) {
-          j++;
-          continue;
-        }
-
-        if (
-          /^[^\p{L}\p{M}\p{N}\s]+$/u.test(tokens[j])
-        ) {
-          break;
-        }
-
-        candidateWords.push(normalize(tokens[j]));
-        j++;
-      }
-      
-    const exactMatch =
-      candidateWords.length === phraseWords.length &&
-      candidateWords.every(
-        (word, index) => word === phraseWords[index]
+    if (match) {
+      const translated = getPrimaryDisplayAlias(match.entry, targetLanguage);
+      result.push(
+        translated
+          ? matchInitialCase(token, translated)
+          : token
       );
-
-    const fallbackMatch =
-      candidateWords.length === phraseWords.length &&
-      candidateWords.every(
-        (word, index) =>
-          normalizeForLookup(word) ===
-          normalizeForLookup(phraseWords[index])
-      );
-
-    if (exactMatch || fallbackMatch) {
-      matchedEntry = exactMatch
-        ? reverseMap.get(phrase)
-        : fallbackReverseMap.get(
-            normalizeForLookup(phrase)
-          );
-
-      matchedEnd = j;
-      break;
-    }
-
-    }
-
-    if (matchedEntry) {
-      // Ambil padanan bahasa tujuan dari dataset.
-      const aliases = matchedEntry.aliases[targetLanguage];
-      const translated = aliases.find(
-        (alias) => alias.trim().length > 0
-      );
-
-      result.push(translated ?? tokens[i]);
-      i = matchedEnd;
+      i = match.endIndex;
     } else {
-      // Jika kata tidak ditemukan, pertahankan kata aslinya.
       result.push(token);
       i++;
     }
   }
 
-  return result.join("");
+  const joined = result.join("");
+
+  // Rapikan spasi antar karakter Mandarin agar hasil terjemahan balik terlihat alami.
+  if (targetLanguage === "zh") {
+    return joined
+      .replace(/([\p{Script=Han}])\s+(?=[\p{Script=Han}])/gu, "$1")
+      .replace(/\s+([，。！？、；：,.!?;:])/gu, "$1")
+      .trim();
+  }
+
+  return joined.replace(/ {2,}/g, " ").trim();
 }

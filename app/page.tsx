@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   latinToAksara,
   aksaraToLatin,
@@ -14,7 +14,48 @@ import {
   type SourceLanguage,
 } from "@/lib/translator";
 
+import {
+  speakText,
+  stopSpeech,
+  type SpeechLanguage,
+} from "@/lib/speech";
+
 type TranslationMode = "toJavanese" | "fromAksara";
+type AudioTarget = "first" | "second";
+
+function SpeakerIcon({ active }: { active: boolean }) {
+  if (active) {
+    return (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        className="h-4 w-4"
+        aria-hidden="true"
+      >
+        <rect x="6" y="6" width="12" height="12" rx="2" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4"
+      aria-hidden="true"
+    >
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+    </svg>
+  );
+}
 
 const ui = {
   id: {
@@ -29,7 +70,7 @@ const ui = {
     input: "Masukkan kalimat",
     inputAksara: "Masukkan Aksara Jawa",
     placeholder: "Contoh: Saya pergi ke pasar",
-    placeholderAksara: "Contoh: ꦱꦪ ꦩꦔꦤ꧀",
+    placeholderAksara: "Contoh: ꦏꦸꦭ ꦤꦼꦝ",
     translate: "Terjemahkan",
     meaning: "Hasil terjemahan Bahasa Jawa",
     latin: "Transliterasi Latin",
@@ -37,13 +78,17 @@ const ui = {
     targetMeaning: "Arti terjemahan",
     copy: "Salin hasil",
     copied: "Tersalin ✓",
+    listen: "Dengarkan",
+    stopAudio: "Hentikan",
     empty: "Silakan masukkan teks terlebih dahulu.",
     copyError: "Gagal menyalin. Silakan salin teks secara manual.",
+    audioUnsupported: "Browser Anda belum mendukung fitur suara.",
+    audioError: "Gagal memutar audio. Silakan coba lagi.",
     error: "Terjadi kesalahan saat menerjemahkan.",
     levels: {
-      ngoko: "Ngoko",
-      krama: "Krama",
-      "krama-inggil": "Krama Inggil",
+      ngoko: "Ngoko (santai / akrab)",
+      krama: "Krama (sopan)",
+      "krama-inggil": "Krama Inggil (sangat halus)",
     },
     footer: "SpeakJawa — Bahasa Jawa dan Aksara Jawa",
   },
@@ -60,7 +105,7 @@ const ui = {
     input: "Enter your sentence",
     inputAksara: "Enter Javanese script",
     placeholder: "Example: I am going to the market",
-    placeholderAksara: "Example: ꦱꦪ ꦩꦔꦤ꧀",
+    placeholderAksara: "Example: ꦏꦸꦭ ꦤꦼꦝ",
     translate: "Translate",
     meaning: "Javanese translation",
     latin: "Latin transliteration",
@@ -68,8 +113,12 @@ const ui = {
     targetMeaning: "Translated meaning",
     copy: "Copy result",
     copied: "Copied ✓",
+    listen: "Listen",
+    stopAudio: "Stop",
     empty: "Please enter some text first.",
     copyError: "Copy failed. Please copy the text manually.",
+    audioUnsupported: "Your browser does not support text-to-speech.",
+    audioError: "Failed to play audio. Please try again.",
     error: "An error occurred during translation.",
     levels: {
       ngoko: "Ngoko (informal)",
@@ -91,7 +140,7 @@ const ui = {
     input: "请输入句子",
     inputAksara: "请输入爪哇文字",
     placeholder: "例如：我去市场",
-    placeholderAksara: "例如：ꦱꦪ ꦩꦔꦤ꧀",
+    placeholderAksara: "例如：ꦏꦸꦭ ꦤꦼꦝ",
     translate: "翻译",
     meaning: "爪哇语翻译结果",
     latin: "拉丁字母转写",
@@ -99,8 +148,12 @@ const ui = {
     targetMeaning: "翻译含义",
     copy: "复制结果",
     copied: "已复制 ✓",
+    listen: "朗读",
+    stopAudio: "停止",
     empty: "请先输入文本。",
     copyError: "复制失败，请手动复制文本。",
+    audioUnsupported: "当前浏览器不支持语音朗读功能。",
+    audioError: "语音播放失败，请重试。",
     error: "翻译过程中发生错误。",
     levels: {
       ngoko: "Ngoko（非正式）",
@@ -126,10 +179,20 @@ export default function Home() {
   const [aksara, setAksara] = useState("");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [speakingTarget, setSpeakingTarget] =
+    useState<AudioTarget | null>(null);
 
   const t = ui[sourceLanguage];
 
+  useEffect(() => {
+    return () => {
+      stopSpeech();
+    };
+  }, []);
+
   function clearResults() {
+    stopSpeech();
+    setSpeakingTarget(null);
     setJavanese("");
     setAksara("");
     setError("");
@@ -216,6 +279,36 @@ export default function Home() {
       setError(t.copyError);
       setCopied(false);
     }
+  }
+
+  function handleSpeak(target: AudioTarget) {
+    if (speakingTarget === target) {
+      stopSpeech();
+      setSpeakingTarget(null);
+      return;
+    }
+
+    const textToSpeak = target === "first" ? javanese : aksara;
+    if (!textToSpeak.trim()) return;
+
+    const speechLanguage: SpeechLanguage =
+      target === "first" ? "jv" : sourceLanguage;
+
+    setError("");
+    speakText({
+      text: textToSpeak,
+      language: speechLanguage,
+      onStart: () => setSpeakingTarget(target),
+      onEnd: () => setSpeakingTarget(null),
+      onError: (reason) => {
+        setSpeakingTarget(null);
+        setError(
+          reason === "unsupported"
+            ? t.audioUnsupported
+            : t.audioError
+        );
+      },
+    });
   }
 
   const firstResultLabel =
@@ -383,9 +476,28 @@ export default function Home() {
           <div className="mt-6 space-y-5">
             {/* First Result */}
             <div>
-              <h2 className="mb-2 text-sm font-semibold text-slate-700">
-                {firstResultLabel}
-              </h2>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <h2 className="text-sm font-semibold text-slate-700">
+                  {firstResultLabel}
+                </h2>
+
+                <button
+                  type="button"
+                  onClick={() => handleSpeak("first")}
+                  disabled={!javanese}
+                  aria-pressed={speakingTarget === "first"}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition disabled:opacity-50 ${
+                    speakingTarget === "first"
+                      ? "border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
+                      : "bg-white text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  <SpeakerIcon active={speakingTarget === "first"} />
+                  <span>
+                    {speakingTarget === "first" ? t.stopAudio : t.listen}
+                  </span>
+                </button>
+              </div>
 
               <div className="rounded-2xl border bg-white p-5 shadow-sm">
                 <p
@@ -407,14 +519,37 @@ export default function Home() {
                   {secondResultLabel}
                 </h2>
 
-                <button
-                  type="button"
-                  onClick={copyResult}
-                  disabled={!aksara}
-                  className="rounded-lg border bg-white px-3 py-1.5 text-sm font-medium transition hover:bg-slate-50 disabled:opacity-50"
-                >
-                  {copied ? t.copied : t.copy}
-                </button>
+                <div className="flex items-center gap-2">
+                  {mode === "fromAksara" && (
+                    <button
+                      type="button"
+                      onClick={() => handleSpeak("second")}
+                      disabled={!aksara}
+                      aria-pressed={speakingTarget === "second"}
+                      className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition disabled:opacity-50 ${
+                        speakingTarget === "second"
+                          ? "border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
+                          : "bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      <SpeakerIcon active={speakingTarget === "second"} />
+                      <span>
+                        {speakingTarget === "second"
+                          ? t.stopAudio
+                          : t.listen}
+                      </span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={copyResult}
+                    disabled={!aksara}
+                    className="rounded-lg border bg-white px-3 py-1.5 text-sm font-medium transition hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {copied ? t.copied : t.copy}
+                  </button>
+                </div>
               </div>
 
               <div className="min-h-32 rounded-2xl border bg-white p-6 shadow-sm">

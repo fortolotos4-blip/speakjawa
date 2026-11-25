@@ -21,6 +21,13 @@ const CONSONANTS: Record<string, string> = {
   b: "ꦧ",
   th: "ꦛ",
   ng: "ꦔ",
+  // Aksara rekan untuk bunyi serapan umum
+  kh: "ꦏ꦳",
+  dz: "ꦢ꦳",
+  gh: "ꦒ꦳",
+  f: "ꦥ꦳",
+  v: "ꦥ꦳",
+  z: "ꦗ꦳",
 };
 
 const VOWELS: Record<string, string> = {
@@ -28,25 +35,16 @@ const VOWELS: Record<string, string> = {
   i: "ꦶ",
   u: "ꦸ",
   e: "ꦺ",
-  o: "ꦺꦴ",
   é: "ꦺ",
+  è: "ꦺ",
   ê: "ꦼ",
-};
-
-const INDEPENDENT_VOWELS: Record<string, string> = {
-  a: "ꦄ",
-  i: "ꦆ",
-  u: "ꦈ",
-  e: "ꦌ",
-  é: "ꦌ",
-  ê: "ꦄ",
-  o: "ꦎ",
+  o: "ꦺꦴ",
 };
 
 const FINAL_SIGNS: Record<string, string> = {
   ng: "ꦁ", // cecak
-  r: "ꦂ",  // layar
-  h: "ꦃ",  // wignyan
+  r: "ꦂ", // layar
+  h: "ꦃ", // wignyan
 };
 
 const JAVANESE_DIGITS: Record<string, string> = {
@@ -67,59 +65,150 @@ const MEDIAL_SIGNS: Record<string, string> = {
   y: "ꦾ", // pengkal
 };
 
-// Beberapa kata yang e-nya perlu dibedakan.
-// Input tanpa diakritik memang ambigu dalam Bahasa Jawa.
-
-const PEPET_WORDS: Record<string, string> = {
-  dhateng: "dhatêng",
-  kembang: "kêmbang",
-  teka: "têka",
-  suket: "sukêt",
-  sekar: "sêkar",
-  temen: "têmen",
-  tekan: "têkan",
-  wektu: "wêktu",
-  ngerti: "ngêrti",
-  neng: "nêng",
-
-  // Tambahan kosakata Krama
-  nedha: "nêdha",
-  sekul: "sêkul",
+const SPECIAL_SYLLABLES = {
+  paCeret: "ꦉ", // rê
+  ngaLelet: "ꦊ", // lê
+  cakraKeret: "ꦽ", // konsonan + rê
 };
 
+// Daftar kata umum Bahasa Jawa yang huruf "e"-nya perlu dibedakan secara pasti
+// antara pepet (ê -> ꦼ) dan taling (é/è -> ꦺ).
+const WORD_SPELLING_OVERRIDES: Record<string, string> = {
+  // Pepet (ê)
+  adhem: "adhêm",
+  anem: "anêm",
+  arep: "arêp",
+  ayem: "ayêm",
+  bener: "bênêr",
+  benter: "bêntêr",
+  boten: "botên",
+  cemeng: "cêmêng",
+  cepet: "cêpêt",
+  dalem: "dalêm",
+  dhateng: "dhatêng",
+  dhemen: "dhêmên",
+  dinten: "dintên",
+  enem: "ênêm",
+  enom: "ênom",
+  gelem: "gêlêm",
+  ijem: "ijêm",
+  ireng: "irêng",
+  jeneng: "jênêng",
+  jenengku: "jênêngku",
+  jumeneng: "jumênêng",
+  kagem: "kagêm",
+  kangen: "kangên",
+  kemawon: "kêmawon",
+  kembang: "kêmbang",
+  kepripun: "kêpripun",
+  kertas: "kêrtas",
+  lega: "lêga",
+  lemah: "lêmah",
+  lemu: "lêmu",
+  lenggah: "lênggah",
+  leres: "lêrês",
+  mangertos: "mangêrtos",
+  mboten: "mbotên",
+  menapa: "mênapa",
+  menawi: "mênawi",
+  mendhet: "mêndhêt",
+  mengko: "mêngko",
+  menika: "mênika",
+  menyang: "mênyang",
+  nedha: "nêdha",
+  neng: "nêng",
+  ngadeg: "ngadêg",
+  ngendika: "ngêndika",
+  ngerti: "ngêrti",
+  ngrembug: "ngrêmbug",
+  peken: "pêkên",
+  pethak: "pêthak",
+  pinter: "pintêr",
+  rega: "rêga",
+  rembag: "rêmbag",
+  rembug: "rêmbug",
+  resik: "rêsik",
+  saged: "sagêd",
+  sedanten: "sêdantên",
+  sedasa: "sêdasa",
+  sedaya: "sêdaya",
+  sega: "sêga",
+  segawon: "sêgawon",
+  sekar: "sêkar",
+  sekedhap: "sêkêdhap",
+  sekul: "sêkul",
+  seneng: "sênêng",
+  sepuh: "sêpuh",
+  sepuluh: "sêpuluh",
+  setunggal: "sêtunggal",
+  sewelas: "sêwêlas",
+  sewidak: "sêwidak",
+  sonten: "sontên",
+  sugeng: "sugêng",
+  suket: "sukêt",
+  teka: "têka",
+  tekan: "têkan",
+  telas: "têlas",
+  telu: "têlu",
+  temen: "têmên",
+  tentrem: "têntrêm",
+  tilem: "tilêm",
+  tresna: "trêsna",
+  wektu: "wêktu",
+  werna: "wêrna",
+  wonten: "wontên",
 
-const TALING_WORDS: Record<string, string> = {
-  badhe: "badé",
-  bade: "badé",
+  // Campuran pepet & taling
+  ndherekaken: "ndhèrèkakên",
+  sedhela: "sêdhéla",
+  srengenge: "srêngéngé",
+
+  // Taling (é / è)
   akeh: "akèh",
+  bade: "badé",
+  badhe: "badhé",
+  dereng: "dèrèng",
+  dhewe: "dhéwé",
+  dheweke: "dhéwéké",
   duwe: "duwé",
-  goleki: "goléki",
-  goleke: "goléké",
-  meja: "méja",
-  sega: "séga",
-  sore: "soré",
-  rene: "réne",
+  enak: "énak",
+  enggal: "énggal",
+  enjang: "énjang",
+  entek: "èntèk",
+  esuk: "ésuk",
+  ewu: "èwu",
+  gawe: "gawé",
+  goleke: "golèké",
+  goleki: "golèki",
+  kabeh: "kabèh",
   kene: "kéné",
+  kesah: "késah",
+  kowe: "kowé",
+  meja: "méja",
+  ndherek: "ndhèrèk",
+  ngombe: "ngombé",
+  piye: "piyé",
+  rame: "ramé",
+  rene: "réné",
+  sae: "saé",
+  sampeyan: "sampéyan",
+  sare: "saré",
+  sewu: "sèwu",
+  sore: "soré",
+  suwe: "suwé",
+  wae: "waé",
+  wedang: "wédang",
 };
 
 function normalizeWord(word: string): string {
   const lower = word.toLowerCase();
-
-  if (PEPET_WORDS[lower]) {
-    return PEPET_WORDS[lower];
-  }
-
-  if (TALING_WORDS[lower]) {
-    return TALING_WORDS[lower];
-  }
-
-  return lower;
+  return WORD_SPELLING_OVERRIDES[lower] ?? lower;
 }
 
 function isVowel(char: string | undefined): boolean {
   if (!char) return false;
 
-  return ["a", "i", "u", "e", "o", "é", "ê"].includes(char);
+  return ["a", "i", "u", "e", "o", "é", "è", "ê"].includes(char);
 }
 
 function isDigit(char: string | undefined): boolean {
@@ -155,6 +244,15 @@ function buildSyllable(
   consonant: string,
   vowel: string | null
 ): string {
+  // Kaidah baku Aksara Jawa: rê -> Pa Ceret (ꦉ), lê -> Nga Lelet (ꦊ).
+  if (consonant === "r" && vowel === "ê") {
+    return SPECIAL_SYLLABLES.paCeret;
+  }
+
+  if (consonant === "l" && vowel === "ê") {
+    return SPECIAL_SYLLABLES.ngaLelet;
+  }
+
   let result = CONSONANTS[consonant];
 
   if (vowel) {
@@ -165,7 +263,7 @@ function buildSyllable(
 }
 
 /**
- * Mengubah satu kata Latin menjadi Aksara Jawa.
+ * Mengubah satu kata Latin menjadi Aksara Jawa sesuai kaidah baku.
  */
 function convertWord(rawWord: string): string {
   if (!rawWord) return "";
@@ -189,11 +287,15 @@ function convertWord(rawWord: string): string {
     }
 
     // =========================================================
-    // VOKAL DI AWAL KATA
+    // VOKAL DI AWAL KATA ATAU SETELAH VOKAL (HIATUS)
+    //
+    // Sesuai kaidah baku Aksara Jawa, vokal mandiri pada kata
+    // Jawa ditulis menggunakan aksara Ha (ꦲ) + sandhangan swara.
+    // Contoh: aku -> ꦲꦏꦸ, ibu -> ꦲꦶꦧꦸ, omah -> ꦲꦺꦴꦩꦃ, sae -> ꦱꦲꦺ.
     // =========================================================
 
     if (isVowel(current)) {
-      result += INDEPENDENT_VOWELS[current];
+      result += CONSONANTS.h + VOWELS[current];
       i++;
       continue;
     }
@@ -222,30 +324,51 @@ function convertWord(rawWord: string): string {
 
     if (vowel) {
       result += buildSyllable(consonant, vowel);
-
       i = nextIndex + 1;
       continue;
     }
 
     // =========================================================
-    // KONSONAN + R/Y MEDIAL
+    // KONSONAN PENUTUP SUKU KATA (SIGEG) DI TENGAH ATAU AKHIR KATA
+    //
+    // ng -> cecak (ꦁ), misal: mangga -> ꦩꦁꦒ, dhateng -> ꦝꦠꦼꦁ
+    // r  -> layar (ꦂ), misal: kertas -> ꦏꦼꦂꦠꦱ꧀, pasar -> ꦥꦱꦂ
+    // h  -> wignyan (ꦃ), misal: wahyu -> ꦮꦃꦪꦸ, kesah -> ꦏꦺꦱꦃ
+    // =========================================================
+
+    const afterVowel = i > 0 && isVowel(word[i - 1]);
+
+    if (FINAL_SIGNS[consonant] && afterVowel) {
+      result += FINAL_SIGNS[consonant];
+      i = nextIndex;
+      continue;
+    }
+
+    // =========================================================
+    // KONSONAN + R/Y MEDIAL (CAKRA, CAKRA KERET, PENGKAL)
     //
     // contoh:
-    // krupuk -> ꦏꦿꦸ...
-    // ry...
-    // ky...
+    // krupuk -> ꦏꦿꦸꦥꦸꦏ꧀
+    // tresna -> ꦠꦽꦱ꧀ꦤ (cakra keret untuk r + ê)
+    // kyai   -> ꦏꦾꦲꦶ
     // =========================================================
 
     const medial = word[nextIndex];
+    const vowelAfterMedial = getVowel(word, nextIndex + 1);
 
     if (
       medial === "r" &&
-      nextIndex + 1 < word.length &&
-      isVowel(word[nextIndex + 1])
+      vowelAfterMedial &&
+      consonant !== "r" &&
+      consonant !== "h"
     ) {
       result += CONSONANTS[consonant];
-      result += MEDIAL_SIGNS.r;
-      result += VOWELS[word[nextIndex + 1]];
+
+      if (vowelAfterMedial === "ê") {
+        result += SPECIAL_SYLLABLES.cakraKeret;
+      } else {
+        result += MEDIAL_SIGNS.r + VOWELS[vowelAfterMedial];
+      }
 
       i = nextIndex + 2;
       continue;
@@ -253,52 +376,30 @@ function convertWord(rawWord: string): string {
 
     if (
       medial === "y" &&
-      nextIndex + 1 < word.length &&
-      isVowel(word[nextIndex + 1])
+      vowelAfterMedial &&
+      consonant !== "y" &&
+      consonant !== "h"
     ) {
       result += CONSONANTS[consonant];
       result += MEDIAL_SIGNS.y;
-      result += VOWELS[word[nextIndex + 1]];
+      result += VOWELS[vowelAfterMedial];
 
       i = nextIndex + 2;
       continue;
     }
 
     // =========================================================
-    // KONSONAN AKHIR
-    //
-    // ng -> cecak
-    // r  -> layar
-    // h  -> wignyan
+    // KONSONAN AKHIR ATAU KONSONAN + KONSONAN (PASANGAN / PANGKON)
     // =========================================================
 
-    if (nextIndex >= word.length) {
-      if (FINAL_SIGNS[consonant]) {
-        result += FINAL_SIGNS[consonant];
-      } else {
-        result += CONSONANTS[consonant];
-        result += "꧀";
-      }
-
+    if (nextIndex >= word.length && FINAL_SIGNS[consonant]) {
+      result += FINAL_SIGNS[consonant];
       i = nextIndex;
       continue;
     }
 
-    // =========================================================
-    // KONSONAN + KONSONAN
-    //
-    // Menggunakan pangkon sebagai dasar pasangan.
-    //
-    // Contoh:
-    // kembang
-    // k + e
-    // m + b
-    // a + ng
-    // =========================================================
-
     result += CONSONANTS[consonant];
     result += "꧀";
-
     i = nextIndex;
   }
 
@@ -320,6 +421,14 @@ function convertToken(token: string): string {
       .join("");
   }
 
+  // Kata ulang / ber-tanda hubung (misal: apa-apa, alun-alun)
+  if (/[\p{L}\p{N}]-[\p{L}\p{N}]/u.test(token)) {
+    return token
+      .split("-")
+      .map((part) => convertToken(part))
+      .join("-");
+  }
+
   // Tanda baca di awal
   const leading = token.match(/^[^\p{L}\p{N}]+/u)?.[0] ?? "";
 
@@ -338,11 +447,7 @@ function convertToken(token: string): string {
     return token;
   }
 
-  return (
-    leading +
-    convertWord(core) +
-    trailing
-  );
+  return leading + convertWord(core) + trailing;
 }
 
 /**
@@ -374,67 +479,113 @@ export function latinToAksara(text: string): string {
     .join("");
 }
 
+const REVERSE_CONSONANTS = new Map<string, string>(
+  Object.entries(CONSONANTS)
+    .filter(([latin]) => latin !== "v" && !["kh", "dz", "gh", "f", "z"].includes(latin))
+    .map(([latin, aksara]) => [aksara, latin])
+);
+
+const REVERSE_REKAN = new Map<string, string>([
+  ["ꦏ", "kh"],
+  ["ꦢ", "dz"],
+  ["ꦒ", "gh"],
+  ["ꦥ", "f"],
+  ["ꦗ", "z"],
+]);
+
+const REVERSE_INDEPENDENT_VOWELS = new Map<string, string>([
+  ["ꦄ", "a"],
+  ["ꦆ", "i"],
+  ["ꦈ", "u"],
+  ["ꦌ", "e"],
+  ["ꦎ", "o"],
+]);
+
+const REVERSE_DIGITS = new Map<string, string>(
+  Object.entries(JAVANESE_DIGITS).map(([latin, aksara]) => [
+    aksara,
+    latin,
+  ])
+);
+
 /**
  * Mengubah Aksara Jawa menjadi tulisan Latin.
  *
  * Mendukung:
- * - Aksara nglegena
- * - Sandhangan swara
- * - Pangkon
- * - Cakra dan pengkal
+ * - Aksara nglegena & aksara rekan (cecak telu ꦳)
+ * - Pa ceret (ꦉ), nga lelet (ꦊ), dan cakra keret (ꦽ)
+ * - Sandhangan swara, pangkon, cakra, pengkal
  * - Cecak, layar, dan wignyan
- * - Aksara swara
- * - Angka Jawa
- *
- * Catatan: beberapa ejaan Latin tidak dapat dipulihkan secara
- * pasti karena satu aksara dapat mewakili beberapa bunyi.
+ * - Aksara swara, angka Jawa, dan tanda baca Jawa (꧈, ꧉)
  */
 export function aksaraToLatin(text: string): string {
   if (!text.trim()) return "";
-
-  const reverseConsonants = new Map<string, string>(
-    Object.entries(CONSONANTS).map(([latin, aksara]) => [
-      aksara,
-      latin,
-    ])
-  );
-
-  const reverseIndependentVowels = new Map<string, string>([
-    ["ꦄ", "a"],
-    ["ꦆ", "i"],
-    ["ꦈ", "u"],
-    ["ꦌ", "e"],
-    ["ꦎ", "o"],
-  ]);
-
-  const reverseDigits = new Map<string, string>(
-    Object.entries(JAVANESE_DIGITS).map(([latin, aksara]) => [
-      aksara,
-      latin,
-    ])
-  );
 
   const chars = Array.from(text);
   let result = "";
 
   for (let i = 0; i < chars.length; i++) {
     const char = chars[i];
+    const nextChar = chars[i + 1];
 
     // Angka Jawa
-    if (reverseDigits.has(char)) {
-      result += reverseDigits.get(char);
+    if (REVERSE_DIGITS.has(char)) {
+      result += REVERSE_DIGITS.get(char);
+      continue;
+    }
+
+    // Tanda baca Aksara Jawa
+    if (char === "꧈") {
+      result += ",";
+      continue;
+    }
+
+    if (char === "꧉") {
+      result += ".";
       continue;
     }
 
     // Aksara swara atau vokal mandiri
-    if (reverseIndependentVowels.has(char)) {
-      result += reverseIndependentVowels.get(char);
+    if (REVERSE_INDEPENDENT_VOWELS.has(char)) {
+      result += REVERSE_INDEPENDENT_VOWELS.get(char);
       continue;
     }
 
-    // Aksara dasar: secara default memiliki vokal inheren "a"
-    if (reverseConsonants.has(char)) {
-      result += reverseConsonants.get(char) + "a";
+    // Pa ceret (rê) dan Nga lelet (lê)
+    if (char === SPECIAL_SYLLABLES.paCeret) {
+      result += "rê";
+      continue;
+    }
+
+    if (char === SPECIAL_SYLLABLES.ngaLelet) {
+      result += "lê";
+      continue;
+    }
+
+    // Aksara rekan (konsonan + cecak telu ꦳)
+    if (nextChar === "꦳" && REVERSE_REKAN.has(char)) {
+      result += REVERSE_REKAN.get(char) + "a";
+      i++;
+      continue;
+    }
+
+    // Aksara dasar: secara default memiliki vokal inheren "a".
+    // Khusus ꦲ (Ha) di awal kata atau setelah vokal dibaca sebagai vokal
+    // sesuai pelafalan baku Bahasa Jawa (misal ꦲꦏꦸ -> aku, ꦱꦲꦺ -> saé).
+    if (REVERSE_CONSONANTS.has(char)) {
+      if (char === "ꦲ") {
+        const prevChar = chars[i - 1];
+        const isAtWordStart = !prevChar || /[\s.,!?;:\-()"'“”‘’꧈꧉]/.test(prevChar);
+        const isAfterVowelResult = /[aiueoéèê]$/.test(result);
+        const isFollowedByPangkon = nextChar === "꧀";
+
+        if ((isAtWordStart || isAfterVowelResult) && !isFollowedByPangkon) {
+          result += "a";
+          continue;
+        }
+      }
+
+      result += REVERSE_CONSONANTS.get(char) + "a";
       continue;
     }
 
@@ -510,6 +661,14 @@ export function aksaraToLatin(text: string): string {
       continue;
     }
 
+    // Cakra keret: tambahan bunyi rê
+    if (char === SPECIAL_SYLLABLES.cakraKeret) {
+      if (result.endsWith("a")) {
+        result = result.slice(0, -1) + "rê";
+      }
+      continue;
+    }
+
     // Pengkal: tambahan bunyi y
     if (char === "ꦾ") {
       if (result.endsWith("a")) {
@@ -518,8 +677,7 @@ export function aksaraToLatin(text: string): string {
       continue;
     }
 
-    // Karakter lain, termasuk spasi dan tanda baca,
-    // dipertahankan.
+    // Karakter lain, termasuk spasi dan tanda baca, dipertahankan.
     result += char;
   }
 
